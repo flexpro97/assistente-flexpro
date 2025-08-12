@@ -1,0 +1,59 @@
+# ===================================================================
+# CÓDIGO FINAL - VERSÃO DE PRODUÇÃO 7.0
+# ===================================================================
+import os
+import logging
+import faiss
+from sentence_transformers import SentenceTransformer
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+import numpy as np
+
+# --- CONFIGURAÇÕES ---
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# --- BIBLIOTECA DE CONHECIMENTO ---
+knowledge_chunks = [
+    "El 'consejo de oro' reside en la creencia de que las ofertas de Whole Foods se liberan con mayor frecuencia cuando el minuto del reloj termina en 1 o 6.", "Para maximizar ganancias con Whole Foods, la velocidad es esencial. Mantén el dedo listo para 'actualizar' la pantalla de ofertas, especialmente en los segundos previos al minuto 01 y 06.", "Herramientas como Magic Flex utilizan un sistema que optimiza tu visibilidad en múltiples estaciones a la vez. Esto significa que no necesitas estar físicamente cerca de un almacén para capturar sus ofertas.", "Las violaciones más graves que llevan a la desactivación incluyen el uso de bots, compartir tu cuenta, y un patrón de reclamaciones de 'Paquete No Recibido' (DNR) o devoluciones frecuentes.", "Mantener un Standing 'Fantastic' o 'Great' es tu mejor defensa, ya que funciona como un 'colchón' o 'buffer' mayor contra las inevitables fallas y problemas.", "Para salir de la lista de espera, una táctica avanzada es la 'Estrategia del Cambio de Región': registrarse en una zona con alta demanda para ser activado y luego solicitar la transferencia a tu ciudad.", "El cambio de región ahora requiere alcanzar el 'Nivel 2' en el programa de recompensas antes de que se considere una solicitud de transferencia.", "Los bloques de Whole Foods y Amazon Fresh tienen el mayor potencial de rentabilidad por hora (estimado entre $25 y $40+) debido a las propinas.", "Los bloques de Logistics/SSD son más consistentes, pero solo se vuelven rentables cuando consigues tarifas 'surge' (pico) por encima del valor base.", "La naturaleza 'contingente' de la cobertura de colisión de Amazon significa que solo se activa si el conductor también tiene cobertura amplia y de colisión en su póliza de seguro personal.", "El método de organización por Número de Parada (Stop Number) es el más recomendado por la comunidad por su precisión. Anota el número en el paquete con un marcador.", "Una 'cancelación tardía' ocurre cuando renuncias al bloque dentro de la ventana de 45 minutos. Un 'bloque perdido' es una inasistencia total y es una violación más grave.", "Para apelar una desactivación, el primer paso es enviar un email a amazonflex-appeals@amazon.com. Si es denegada, el siguiente paso es escalar a jeff@amazon.com."
+]
+
+# --- CRIAÇÃO DO "SUPER ÍNDICE" COM IA ---
+logger.info("Carregando o modelo de IA para o Super Índice...")
+model = SentenceTransformer('all-MiniLM-L6-v2')
+chunk_embeddings = model.encode(knowledge_chunks)
+index = faiss.IndexFlatL2(chunk_embeddings.shape[0])
+index.add(np.array(chunk_embeddings))
+logger.info("Super Índice criado com sucesso.")
+
+# --- O CÉREBRO DO BOT ---
+def get_intelligent_response(question):
+    question_embedding = model.encode([question])
+    D, I = index.search(np.array(question_embedding), k=3)
+    relevant_chunks = [knowledge_chunks[i] for i in I[0]]
+    response = "¡Hola! Con base en la metodología FlexPro, aquí tienes la información más relevante sobre tu pregunta:\n\n"
+    formatted_chunks = [f"- {chunk}" for chunk in relevant_chunks]
+    response += "\n".join(formatted_chunks)
+    response += "\n\nEspero que esto te ayude."
+    return response
+
+# --- CÓDIGO DO TELEGRAM ---
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+
+async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_message = update.message.text
+    logger.info(f"Recebida mensagem: {user_message}")
+    ai_response = get_intelligent_response(user_message)
+    await update.message.reply_text(ai_response)
+
+def main() -> None:
+    if not TOKEN:
+        logger.error("A variável de ambiente TELEGRAM_TOKEN não foi definida!")
+        return
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, answer))
+    logger.info("Assistente VIP FlexPro está online na sua casa nova!")
+    application.run_polling()
+
+if __name__ == '__main__':
+    main()
